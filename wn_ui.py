@@ -267,9 +267,9 @@ def report_dialog(item_type, item_id):
 
 
 def decision_badge(decision):
-    colors = {"pass": ("#145C40", "#DDF1E6", "Passed AI review"),
+    colors = {"pass": ("#145C40", "#DDF1E6", "Passed safety check"),
               "review": ("#7A4B00", "#FBEBC8", "Needs editor review"),
-              "block": ("#8B1E2B", "#F8DDE0", "Blocked by AI review")}
+              "block": ("#8B1E2B", "#F8DDE0", "Blocked by safety check")}
     fg, bg, label = colors.get(decision, ("#3D4844", "#E6E9E5", decision or "Not checked"))
     return f'<span class="wn-badge" style="color:{fg};background:{bg}">{label}</span>'
 

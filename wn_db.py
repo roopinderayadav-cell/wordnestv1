@@ -287,6 +287,26 @@ CREATE TABLE IF NOT EXISTS interview_video (
     transcript TEXT,
     PRIMARY KEY (interview_id, q_index)
 );
+CREATE TABLE IF NOT EXISTS news_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    section TEXT NOT NULL,
+    headline TEXT NOT NULL,
+    summary TEXT,
+    body TEXT,
+    source_name TEXT,
+    source_url TEXT,
+    source_title TEXT,
+    norm_title TEXT,
+    source_published TEXT,
+    status TEXT NOT NULL DEFAULT 'draft',         -- draft | published | rejected | skipped
+    engine TEXT,
+    checks TEXT,
+    thin INTEGER DEFAULT 0,
+    ai_decision TEXT,
+    ai_report TEXT,
+    article_id INTEGER,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS service_orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),

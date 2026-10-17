@@ -38,7 +38,9 @@ def page_admin():
     pend_j = wn_db.q("SELECT COUNT(*) n FROM jobs WHERE status='pending'", one=True)["n"]
     pend_c = wn_db.q("SELECT COUNT(*) n FROM companies WHERE status='pending'", one=True)["n"]
     open_r = wn_db.q("SELECT COUNT(*) n FROM reports WHERE status='open'", one=True)["n"]
-    names = [f"Review queue ({pend_a + pend_b + pend_j})", "Post news", f"Reports ({open_r})", "Manage content"]
+    drafts_n = wn_db.q("SELECT COUNT(*) n FROM news_drafts WHERE status='draft'", one=True)["n"]
+    names = [f"Review queue ({pend_a + pend_b + pend_j})", f"News bot ({drafts_n})", "Post news", f"Reports ({open_r})",
+             "Manage content"]
     if admin:
         open_s = wn_db.q("SELECT COUNT(*) n FROM service_orders WHERE status IN ('booked','scheduled')", one=True)["n"]
         names += [f"Companies ({pend_c})", f"Career services ({open_s})", "Upload a book", "Users and reminders",
@@ -47,23 +49,25 @@ def page_admin():
     with tabs[0]:
         _queue(user)
     with tabs[1]:
-        _post_news(user)
+        _news_bot(user)
     with tabs[2]:
-        _reports()
+        _post_news(user)
     with tabs[3]:
+        _reports()
+    with tabs[4]:
         _manage()
     if admin:
-        with tabs[4]:
-            _companies()
         with tabs[5]:
-            _service_orders()
+            _companies()
         with tabs[6]:
-            _upload_book(user)
+            _service_orders()
         with tabs[7]:
-            _users()
+            _upload_book(user)
         with tabs[8]:
-            _sales()
+            _users()
         with tabs[9]:
+            _sales()
+        with tabs[10]:
             _settings()
 
 
@@ -165,6 +169,107 @@ def _decide(table, item, editor):
         wn_db.x(f"UPDATE {table} SET ai_decision=?, ai_report=? WHERE id=?", (rep["decision"], json.dumps(rep), item["id"]))
         wn_db.log_moderation(kind, item["id"], rep["decision"], rep["engine"], rep)
         st.rerun()
+
+
+# ---------------------------------------------------------------- news bot
+def _news_bot(editor):
+    import wn_ai
+    import wn_newsbot
+    msg = st.session_state.pop("bot_msg", None)
+    if msg:
+        st.success(msg)
+    st.markdown("The bot reads news feeds for each section and writes **neutral drafts**. Nothing goes live until you open "
+                "the source, check the facts and press **Publish**.")
+    c1, c2, c3 = st.columns([1.6, 1.2, 2], vertical_alignment="center")
+    per = c2.select_slider("Drafts per section", [1, 2, 3, 4, 5], value=3)
+    if c1.button("Fetch and draft today's news", type="primary", icon=":material/smart_toy:"):
+        bar = st.progress(0.0, text="Starting...")
+        res = wn_newsbot.run(per, progress=lambda f, t: bar.progress(f, text=t))
+        st.session_state["bot_msg"] = (f"{res['made']} new draft(s) ready." + (f" {res['skipped']} item(s) skipped as unsuitable."
+                                       if res["skipped"] else "") + (" Problems: " + "; ".join(res["errors"][:4]) if res["errors"] else ""))
+        st.rerun()
+    c3.caption(f"Last run: {wn_newsbot.last_run_text()} · {wn_ai.status_text()}")
+    if not wn_ai.providers():
+        st.info("AI is off, so drafts contain the feed headline and snippet only; you write the story. Add GEMINI_API_KEY "
+                "(or OLLAMA_URL on your laptop) for full drafts.")
+
+    drafts = wn_db.q("SELECT * FROM news_drafts WHERE status='draft' ORDER BY section, id DESC")
+    sections = ["All"] + sorted({d["section"] for d in drafts})
+    pick = st.pills("Section", sections, default="All", required=True, label_visibility="collapsed", key="bot_sec")
+    if drafts:
+        old = sum(1 for d in drafts if d["created_at"] < (datetime.datetime.now() - datetime.timedelta(days=2)).isoformat())
+        if old and st.button(f"Reject {old} draft(s) older than 2 days"):
+            wn_db.x("UPDATE news_drafts SET status='rejected' WHERE status='draft' AND created_at<?",
+                    ((datetime.datetime.now() - datetime.timedelta(days=2)).isoformat(),))
+            st.rerun()
+    else:
+        st.caption("No drafts waiting. Press 'Fetch and draft today's news'.")
+    from wn_seed import NEWS_SECTIONS
+    for d in drafts:
+        if pick != "All" and d["section"] != pick:
+            continue
+        with st.container(border=True):
+            st.markdown(f'<span class="wn-kicker">{esc(d["section"])}</span> {decision_badge(d["ai_decision"])} '
+                        + ('<span class="wn-badge" style="color:#7A4B00;background:#FBEBC8">Thin: needs more from the source</span>'
+                           if d["thin"] else "") + f' <span class="wn-meta">drafted by {esc(d["engine"])} · '
+                        f'{fmt_date(d["source_published"] or d["created_at"])}</span>', unsafe_allow_html=True)
+            st.markdown(f"**Source:** [{esc(d['source_name'])}: {esc(d['source_title'])}]({d['source_url']})")
+            checks = json.loads(d["checks"] or "[]")
+            if checks:
+                st.markdown("**Check these in the source before publishing:**\n" + "\n".join(f"- {esc(c)}" for c in checks))
+            with st.form(f"draft_{d['id']}", border=False):
+                k1, k2 = st.columns([1, 3])
+                sec = k1.selectbox("Section", NEWS_SECTIONS, index=NEWS_SECTIONS.index(d["section"])
+                                   if d["section"] in NEWS_SECTIONS else 0)
+                head = k2.text_input("Headline", value=d["headline"], max_chars=140)
+                summ = st.text_area("Summary", value=d["summary"] or "", max_chars=300, height=70)
+                body = st.text_area("Story", value=d["body"] or "", height=200)
+                top = st.checkbox("Show in Today's top news")
+                ok = st.checkbox("I opened the source, checked the facts above, and the story is in our own words.")
+                b1, b2, _ = st.columns([1, 1, 3])
+                pub = b1.form_submit_button("Publish", type="primary")
+                rej = b2.form_submit_button("Reject")
+            if rej:
+                wn_db.x("UPDATE news_drafts SET status='rejected' WHERE id=?", (d["id"],))
+                st.rerun()
+            if pub:
+                if not ok:
+                    st.error("Please confirm you checked the source first.")
+                elif len(head.strip()) < 10 or len(body.split()) < 30:
+                    st.error("The headline needs 10+ characters and the story 30+ words.")
+                else:
+                    with st.spinner("Final safety check..."):
+                        rep = wn_moderation.review(f"{head}\n{summ}\n{body}\nSource: {d['source_name']}", "news")
+                    if rep["decision"] == "block":
+                        show_review(rep)
+                        st.error("Blocked by the safety check. Edit the story or reject it.")
+                    else:
+                        aid = wn_db.x("INSERT INTO articles(kind, title, summary, body, category, language, author_id, source_name, "
+                                      "source_url, is_top, status, ai_decision, ai_report, created_at, published_at) "
+                                      "VALUES ('news',?,?,?,?, 'English', ?,?,?,?, 'published', ?,?,?,?)",
+                                      (head.strip(), summ.strip(), body.strip() + "\n\n*Summary by Wordnest. Read the full report "
+                                       "at the source below.*", sec, editor["id"], d["source_name"], d["source_url"], int(top),
+                                       rep["decision"], json.dumps(rep), wn_db.now(), wn_db.now()))
+                        wn_db.x("UPDATE news_drafts SET status='published', article_id=? WHERE id=?", (aid, d["id"]))
+                        wn_db.log_moderation("news", aid, "published-from-bot", f"editor:{editor['email']}", rep)
+                        st.session_state["bot_msg"] = f"Published: {head.strip()}"
+                        st.rerun()
+
+    with st.expander("News feeds used by the bot"):
+        st.caption("One RSS link per line for each section. Official press-release feeds are the safest sources. "
+                   "Use feeds whose terms allow linking and summarising.")
+        feeds = wn_newsbot.get_feeds()
+        with st.form("feeds"):
+            new = {s: st.text_area(s, value="\n".join(feeds.get(s, [])), height=80) for s in NEWS_SECTIONS}
+            c1, c2 = st.columns(2)
+            save = c1.form_submit_button("Save feeds", type="primary")
+            reset = c2.form_submit_button("Reset to default feeds")
+        if save:
+            wn_newsbot.save_feeds({s: [u.strip() for u in v.splitlines() if u.strip()] for s, v in new.items()})
+            st.success("Feeds saved.")
+        if reset:
+            wn_db.x("DELETE FROM settings WHERE key='news_feeds'")
+            st.rerun()
 
 
 # ---------------------------------------------------------------- news

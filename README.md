@@ -23,6 +23,7 @@ Operated by SHROOP Global.
 | `wn_jobs_data.py` | Industries, functions, sub-roles, levels, the interview question banks and career services (edit freely) |
 | `wn_match.py` | Match % between candidates and jobs, interview builder, attempt rules |
 | `wn_video.py` | The video interview recorder (speaks the question, records the camera answer) |
+| `wn_newsbot.py` | News bot: reads news feeds and drafts neutral stories for an editor to review |
 | `wn_jobs_ai.py` | AI scoring of interviews and CV checks (with a basic fallback) |
 | `wn_ai.py` | Connects to Gemini (cloud) and Ollama (your computer) |
 | `wn_pages_books.py` | Book store, book page, online reader, checkout (demo), PDF download |
@@ -183,6 +184,20 @@ OLLAMA_URL = "http://localhost:11434"
 OLLAMA_MODEL = "qwen2.5:7b"
 ```
 3. Run `streamlit run app.py`. The admin panel shows "AI: ON · Ollama (qwen2.5:7b)". Keep the Ollama app running.
+
+## 5b. News bot (Daily News without a full team)
+
+Admin → **News bot** → **Fetch and draft today's news**:
+1. The bot reads news feeds for each section (Geopolitics, Industry Update, Job Market, Economy, Entertainment, Sport).
+   Defaults are Google News search feeds; edit them under "News feeds used by the bot" and add official press-release
+   feeds (RBI, PIB, ministries, DGCA, company newsrooms) for the safest sources.
+2. For each new item, AI writes a neutral draft in its own words, using only facts in the feed item, with a
+   **"check these facts"** list. Unsuitable items (gossip, crime victims, allegations) are skipped. Duplicates are ignored.
+3. You open the source, check the facts, edit, tick the confirmation and press **Publish** (or Reject).
+   Published stories end with "Summary by Wordnest. Read the full report at the source below."
+- Nothing is published automatically. Without AI, drafts contain the feed headline and snippet for you to rewrite.
+- Suggested routine: run it each morning, publish 6–10 good stories, reject the rest (old drafts can be bulk-rejected).
+- On the live Hostinger site, a daily cron job can run the bot at 7 am so drafts are waiting when you log in.
 
 ## 6. Demo limits (important)
 
